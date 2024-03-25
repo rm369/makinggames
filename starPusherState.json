@@ -1,0 +1,22 @@
+{
+  "player": [
+    5,
+    3
+  ],
+  "stars": [
+    [
+      3,
+      3
+    ],
+    [
+      4,
+      3
+    ]
+  ],
+  "stepCounter": 0,
+  "pushCounter": 0,
+  "levelNum": 27,
+  "currentImage": 1,
+  "undoStack": [],
+  "redoStack": []
+}
