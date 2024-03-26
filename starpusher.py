@@ -1,7 +1,6 @@
 # Star Pusher (a Sokoban clone), by Al Sweigart al@inventwithpython.com
 # (Pygame) A puzzle game where you push the stars over their goals.
-
-
+import heapq
 import random, sys, copy, os, pygame
 from pygame.locals import *
 import json
@@ -21,6 +20,7 @@ TILEFLOORHEIGHT = 40
 CAM_MOVE_SPEED = 10  # how many pixels per frame the camera moves
 KEYDELAY = 300
 KEYINTERVAL = 80
+FRAMERATE = 10
 
 # The percentage of outdoor tiles that have additional
 # decoration on them, such as a tree or rock.
@@ -142,15 +142,14 @@ def runLevel(levels, gameStateObj):
     mapNeedsRedraw = True  # set to True to call drawMap()
     levelSurf = BASICFONT.render('Level %s of %s' % (gameStateObj['levelNum'] + 1, len(levels)), 1, TEXTCOLOR)
     levelRect = levelSurf.get_rect()
-    mapWidth = len(mapObj) * TILEWIDTH
-    mapHeight = (len(mapObj[0]) - 1) * TILEFLOORHEIGHT + TILEHEIGHT
+    mapWidth, mapHeight = getMapSize(mapObj)
     MAX_CAM_Y_PAN = abs(HALF_WINHEIGHT - int(mapHeight / 2)) + TILEWIDTH
     MAX_CAM_X_PAN = abs(HALF_WINWIDTH - int(mapWidth / 2)) + TILEHEIGHT
 
     levelIsComplete = False
     # Track how much the camera has moved:
-    cameraOffsetX = 0
-    cameraOffsetY = 0
+    cameraOffset = [0, 0]
+    path = None
 
     while True:  # main game loop
         # Reset these variables:
@@ -167,10 +166,14 @@ def runLevel(levels, gameStateObj):
             elif event.type == VIDEOEXPOSE:  # handles window minimising/maximising
                 updateWin(DISPLAYSURF.get_size())
                 mapNeedsRedraw = True
+            elif event.type == MOUSEBUTTONDOWN and event.button == 1:
+                path = findPath(event.pos, cameraOffset, mapObj, gameStateObj)
 
             elif event.type == KEYDOWN:
                 # Handle key presses
                 keyPressed = True
+                if path:
+                    path = None  # cancel rest of path
                 if event.key == K_LEFT:
                     playerMoveTo = LEFT
                 elif event.key == K_RIGHT:
@@ -200,15 +203,15 @@ def runLevel(levels, gameStateObj):
 
                 # Set the camera move mode.
                 elif event.key == K_a:
-                    cameraOffsetX = min(MAX_CAM_X_PAN, cameraOffsetX + CAM_MOVE_SPEED)
+                    cameraOffset[0] = min(MAX_CAM_X_PAN, cameraOffset[0] + CAM_MOVE_SPEED)
                 elif event.key == K_d:
-                    cameraOffsetX = max(-MAX_CAM_X_PAN, cameraOffsetX - CAM_MOVE_SPEED)
+                    cameraOffset[0] = max(-MAX_CAM_X_PAN, cameraOffset[0] - CAM_MOVE_SPEED)
                 elif event.key == K_w:
-                    cameraOffsetY = min(MAX_CAM_Y_PAN, cameraOffsetY + CAM_MOVE_SPEED)
+                    cameraOffset[1] = min(MAX_CAM_Y_PAN, cameraOffset[1] + CAM_MOVE_SPEED)
                 elif event.key == K_s:
-                    cameraOffsetY = max(-MAX_CAM_Y_PAN, cameraOffsetY - CAM_MOVE_SPEED)
+                    cameraOffset[1] = max(-MAX_CAM_Y_PAN, cameraOffset[1] - CAM_MOVE_SPEED)
                 elif event.key == K_c:  # center
-                    cameraOffsetX = cameraOffsetY = 0
+                    cameraOffset = [0, 0]
 
                 elif event.key == K_n:
                     return 'next'
@@ -225,11 +228,16 @@ def runLevel(levels, gameStateObj):
                     mapNeedsRedraw = True
 
         if not levelIsComplete:
-            if playerMoveTo != None:
+            if path is not None and len(path) > 0:
+                step = path.pop()
+                playerPos = gameStateObj['player']
+                playerMoveTo = step[0] - playerPos[0], step[1] - playerPos[1]
+                FPSCLOCK.tick(FRAMERATE)
+
+            if playerMoveTo is not None:
                 # If the player pushed a key to move, make the move
                 # (if possible) and push any stars that are pushable.
                 moved = makeMove(mapObj, gameStateObj, playerMoveTo)
-
                 if moved:
                     mapNeedsRedraw = True
 
@@ -249,7 +257,7 @@ def runLevel(levels, gameStateObj):
 
         # Adjust mapSurf's Rect object based on the camera offset.
         mapSurfRect = mapSurf.get_rect()
-        mapSurfRect.center = (HALF_WINWIDTH + cameraOffsetX, HALF_WINHEIGHT + cameraOffsetY)
+        mapSurfRect.center = (HALF_WINWIDTH + cameraOffset[0], HALF_WINHEIGHT + cameraOffset[1])
 
         # Draw mapSurf to the DISPLAYSURF Surface object.
         DISPLAYSURF.blit(mapSurf, mapSurfRect)
@@ -359,7 +367,9 @@ def makeMove(mapObj, gameStateObj, playerMoveTo):
     # The code for handling each of the directions is so similar aside
     # from adding or subtracting 1 to the x/y coordinates. We can
     # simplify it by using the xOffset and yOffset variables.
+    if playerMoveTo is None: return False
     xOffset, yOffset = playerMoveTo
+    if xOffset == 0 and yOffset == 0: return False
 
     # See if the player can move in that direction.
     if isWall(mapObj, playerx + xOffset, playery + yOffset):
@@ -469,6 +479,8 @@ def startScreen():
                 if event.key == K_ESCAPE:
                     terminate()
                 return  # user has pressed a key, so return.
+            elif event.type == MOUSEBUTTONDOWN:
+                return  # user has pressed a mouse button, also return.
             elif event.type == VIDEORESIZE:
                 updateWin(event.dict['size'])
                 redrawNeeded = True
@@ -548,12 +560,12 @@ def readLevelsFile(filename):
 
             # Basic level design sanity checks:
             assert startx != None and starty != None, 'Level %s (around line %s) in %s is missing a "@" or "+" to mark the start point.' % (
-            levelNum + 1, lineNum, filename)
+                levelNum + 1, lineNum, filename)
             assert len(goals) > 0, 'Level %s (around line %s) in %s must have at least one goal.' % (
-            levelNum + 1, lineNum, filename)
+                levelNum + 1, lineNum, filename)
             assert len(stars) >= len(
                 goals), 'Level %s (around line %s) in %s is impossible to solve. It has %s goals but only %s stars.' % (
-            levelNum + 1, lineNum, filename, len(goals), len(stars))
+                levelNum + 1, lineNum, filename, len(goals), len(stars))
 
             # Create level object and starting game state object.
             gameStateObj = {'player': (startx, starty),
@@ -604,9 +616,7 @@ def drawMap(mapObj, gameStateObj, goals):
     # mapSurf will be the single Surface object that the tiles are drawn
     # on, so that it is easy to position the entire map on the DISPLAYSURF
     # Surface object. First, the width and height must be calculated.
-    mapSurfWidth = len(mapObj) * TILEWIDTH
-    mapSurfHeight = (len(mapObj[0]) - 1) * TILEFLOORHEIGHT + TILEHEIGHT
-    mapSurf = pygame.Surface((mapSurfWidth, mapSurfHeight))
+    mapSurf = pygame.Surface(getMapSize(mapObj))
     mapSurf.fill(BGCOLOR)  # start with a blank color on the surface.
 
     # Draw the tile sprites onto this surface.
@@ -664,6 +674,135 @@ def initGameState(levels, currentLevelIndex, currentImage):
     gameStateObj['undoStack'] = []  # both list of move list of step list
     gameStateObj['redoStack'] = []
     return gameStateObj
+
+
+def findPath(winPos, offset, mapObj, gameStateObj):
+    tilePos = mouseToTilePosition(mapObj, offset, winPos)
+    return a_star_search(tilePos, mapObj, gameStateObj)
+
+
+def mouseToTilePosition(mapObj, offset, winPos):
+    mapWidth, mapHeight = getMapSize(mapObj)
+    mapUpperLeft = (HALF_WINWIDTH + offset[0] - mapWidth / 2,
+                    HALF_WINHEIGHT + offset[1] - mapHeight / 2 + (TILEHEIGHT - TILEFLOORHEIGHT) / 2 + 5)
+    mapPos = (winPos[0] - mapUpperLeft[0], winPos[1] - mapUpperLeft[1])
+    return int(mapPos[0] // TILEWIDTH), int(mapPos[1] // TILEFLOORHEIGHT)
+
+
+def getMapSize(mapObj):
+    mapWidth = len(mapObj) * TILEWIDTH
+    mapHeight = (len(mapObj[0]) - 1) * TILEFLOORHEIGHT + TILEHEIGHT
+    return mapWidth, mapHeight
+
+
+# from https://www.geeksforgeeks.org/a-search-algorithm/
+# Define the Cell class
+class Cell:
+    def __init__(self):
+        self.parent_i = 0  # Parent cell's row index
+        self.parent_j = 0  # Parent cell's column index
+        self.f = sys.maxsize  # Total cost of the cell (g + h)
+        self.g = sys.maxsize  # Cost from start to this cell
+        self.h = 0  # Heuristic cost from this cell to destination
+
+
+# Check if a cell is the destination
+def is_destination(row, col, dest):
+    return row == dest[0] and col == dest[1]
+
+
+# Trace the path from source to destination
+def trace_path(cell_details, dest):
+    path = []
+    row = dest[0]
+    col = dest[1]
+
+    # Trace the path from destination to source using parent cells
+    while not (cell_details[row][col].parent_i == row and cell_details[row][col].parent_j == col):
+        path.append((row, col))
+        temp_row = cell_details[row][col].parent_i
+        temp_col = cell_details[row][col].parent_j
+        row = temp_row
+        col = temp_col
+
+    # Add the source cell to the path
+    path.append((row, col))
+    # Reverse the path to get the path from source to destination
+    # path.reverse()  # already done by switching src and dest
+    return path
+
+
+# Implement the A* search algorithm
+def a_star_search(dest, mapObj, gameStateObj):
+    src = gameStateObj['player']
+    mapWidth = len(mapObj)
+    mapHeight = (len(mapObj[0]) - 1)
+
+    if (isBlocked(mapObj, gameStateObj, *dest)  # destination tile blocked or invalid
+            or is_destination(src[0], src[1], dest)):  # already there
+        return None
+
+    # Initialize the closed list (visited cells)
+    closed_list = [[False for _ in range(mapWidth)] for _ in range(mapHeight)]
+    # Initialize the details of each cell
+    cell_details = [[Cell() for _ in range(mapWidth)] for _ in range(mapHeight)]
+
+    # Initialize the start cell details
+    i = src[0]
+    j = src[1]
+    cell_details[i][j].f = 0
+    cell_details[i][j].g = 0
+    cell_details[i][j].h = 0
+    cell_details[i][j].parent_i = i
+    cell_details[i][j].parent_j = j
+
+    # Initialize the open list (cells to be visited) with the start cell
+    open_list = []
+    heapq.heappush(open_list, (0, i, j))
+
+    # Main loop of A* search algorithm
+    while len(open_list) > 0:
+        # Pop the cell with the smallest f value from the open list
+        p = heapq.heappop(open_list)
+
+        # Mark the cell as visited
+        i = p[1]
+        j = p[2]
+        closed_list[i][j] = True
+
+        # For each direction, check the successors
+        for dir in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            new_i = i + dir[0]
+            new_j = j + dir[1]
+
+            # If the successor is valid, unblocked, and not visited
+            if not isBlocked(mapObj, gameStateObj, new_i, new_j) and not closed_list[new_i][new_j]:
+                # If the successor is the destination
+                if is_destination(new_i, new_j, dest):
+                    # Set the parent of the destination cell
+                    cell_details[new_i][new_j].parent_i = i
+                    cell_details[new_i][new_j].parent_j = j
+                    # Trace and print the path from source to destination
+                    return trace_path(cell_details, dest)
+                else:
+                    # Calculate the new f, g, and h values
+                    g_new = cell_details[i][j].g + 1  # way to successor so far
+                    h_new = abs(new_i - dest[0]) + abs(new_j - dest[1])  # minimum way to dest (no diagonals)
+                    f_new = g_new + h_new  # minimum total way
+
+                    # If the cell is not in the open list or the new f value is smaller
+                    if cell_details[new_i][new_j].f > f_new:
+                        # Add the cell to the open list
+                        heapq.heappush(open_list, (f_new, new_i, new_j))
+                        # Update the cell details
+                        cell_details[new_i][new_j].f = f_new
+                        cell_details[new_i][new_j].g = g_new
+                        cell_details[new_i][new_j].h = h_new
+                        cell_details[new_i][new_j].parent_i = i
+                        cell_details[new_i][new_j].parent_j = j
+
+    # If the destination is not found after visiting all cells
+    return None
 
 
 def terminate():
