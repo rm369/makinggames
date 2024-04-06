@@ -743,9 +743,9 @@ def a_star_search(dest, mapObj, gameStateObj):
         return None
 
     # Initialize the closed list (visited cells)
-    closed_list = [[False for _ in range(mapWidth)] for _ in range(mapHeight)]
+    closed_list = [[False for _ in range(mapHeight)] for _ in range(mapWidth)]
     # Initialize the details of each cell
-    cell_details = [[Cell() for _ in range(mapWidth)] for _ in range(mapHeight)]
+    cell_details = [[Cell() for _ in range(mapHeight)] for _ in range(mapWidth)]
 
     # Initialize the start cell details
     i = src[0]
