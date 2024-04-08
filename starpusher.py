@@ -18,9 +18,9 @@ TILEHEIGHT = 85
 TILEFLOORHEIGHT = 40
 
 CAM_MOVE_SPEED = 10  # how many pixels per frame the camera moves
-KEYDELAY = 300
+KEYDELAY = 300       # keyboard autorepeat parameters
 KEYINTERVAL = 80
-FRAMERATE = 10
+FRAMERATE = 50       # framerate for player automove
 
 # The percentage of outdoor tiles that have additional
 # decoration on them, such as a tree or rock.
@@ -149,7 +149,9 @@ def runLevel(levels, gameStateObj):
     levelIsComplete = False
     # Track how much the camera has moved:
     cameraOffset = [0, 0]
-    path = None
+    path = None  # steps to go
+    showPath = None  # steps to show
+    showPathDest = [-1, -1]  # last analyzed destination
 
     while True:  # main game loop
         # Reset these variables:
@@ -168,6 +170,14 @@ def runLevel(levels, gameStateObj):
                 mapNeedsRedraw = True
             elif event.type == MOUSEBUTTONDOWN and event.button == 1:
                 path = findPath(event.pos, cameraOffset, mapObj, gameStateObj)
+            elif event.type == MOUSEMOTION:
+                tilePos = mouseToTilePosition(mapObj, cameraOffset, event.pos)
+                if not isSameVector(*showPathDest, *tilePos):
+                    showPathDest = tilePos
+                    newShowPath = a_star_search(tilePos, mapObj, gameStateObj)
+                    if showPath != newShowPath:
+                        showPath = newShowPath
+                        mapNeedsRedraw = True
 
             elif event.type == KEYDOWN:
                 # Handle key presses
@@ -240,6 +250,8 @@ def runLevel(levels, gameStateObj):
                 moved = makeMove(mapObj, gameStateObj, playerMoveTo)
                 if moved:
                     mapNeedsRedraw = True
+                    showPath = None  # steps to show
+                    showPathDest = [-1, -1]  # last analyzed destination
 
             if isLevelFinished(levelObj, gameStateObj):
                 # level is solved, we should show the "Solved!" image.
@@ -252,7 +264,7 @@ def runLevel(levels, gameStateObj):
         DISPLAYSURF.fill(BGCOLOR)
 
         if mapNeedsRedraw:
-            mapSurf = drawMap(mapObj, gameStateObj, levelObj['goals'])
+            mapSurf = drawMap(mapObj, gameStateObj, levelObj['goals'], showPath)
             mapNeedsRedraw = False
 
         # Adjust mapSurf's Rect object based on the camera offset.
@@ -608,10 +620,14 @@ def floodFill(mapObj, x, y, oldCharacter, newCharacter):
         floodFill(mapObj, x, y - 1, oldCharacter, newCharacter)  # call up
 
 
-def drawMap(mapObj, gameStateObj, goals):
-    """Draws the map to a Surface object, including the player and
-    stars. This function does not call pygame.display.update(), nor
-    does it draw the "Level" and "Steps" text in the corner."""
+def drawMap(mapObj, gameStateObj, goals, showPath):
+    """Draws the map to a Surface object, including the player, stars,
+     and an optional path. This function does not call pygame.display.update(),
+     nor does it draw the "Level" and "Steps" text in the corner.
+    """
+
+    if showPath is None:
+        showPath = []
 
     # mapSurf will be the single Surface object that the tiles are drawn
     # on, so that it is easy to position the entire map on the DISPLAYSURF
@@ -643,6 +659,12 @@ def drawMap(mapObj, gameStateObj, goals):
             elif (x, y) in goals:
                 # Draw a goal without a star on it.
                 mapSurf.blit(IMAGESDICT['uncovered goal'], spaceRect)
+
+            if (x, y) in showPath:
+                pygame.draw.circle(mapSurf, (150, 150, 150),
+                                   (x * TILEWIDTH + TILEWIDTH / 2,
+                                    y * TILEFLOORHEIGHT + (TILEHEIGHT - TILEFLOORHEIGHT) / 2 + 5 + TILEFLOORHEIGHT / 2),
+                                   TILEFLOORHEIGHT / 3, 2)
 
             # Last draw the player on the board.
             if (x, y) == gameStateObj['player']:
@@ -706,9 +728,9 @@ class Cell:
         self.h = 0  # Heuristic cost from this cell to destination
 
 
-# Check if a cell is the destination
-def is_destination(row, col, dest):
-    return row == dest[0] and col == dest[1]
+# Check if two vectors (2-dim list) are identical
+def isSameVector(x1, y1, x2, y2):
+    return x1 == x2 and y1 == y2
 
 
 # Trace the path from source to destination
@@ -739,13 +761,13 @@ def a_star_search(dest, mapObj, gameStateObj):
     mapHeight = (len(mapObj[0]) - 1)
 
     if (isBlocked(mapObj, gameStateObj, *dest)  # destination tile blocked or invalid
-            or is_destination(src[0], src[1], dest)):  # already there
+            or isSameVector(*src, *dest)):  # already there
         return None
 
     # Initialize the closed list (visited cells)
-    closed_list = [[False for _ in range(mapWidth)] for _ in range(mapHeight)]
+    closed_list = [[False for _ in range(mapHeight)] for _ in range(mapWidth)]
     # Initialize the details of each cell
-    cell_details = [[Cell() for _ in range(mapWidth)] for _ in range(mapHeight)]
+    cell_details = [[Cell() for _ in range(mapHeight)] for _ in range(mapWidth)]
 
     # Initialize the start cell details
     i = src[0]
@@ -778,7 +800,7 @@ def a_star_search(dest, mapObj, gameStateObj):
             # If the successor is valid, unblocked, and not visited
             if not isBlocked(mapObj, gameStateObj, new_i, new_j) and not closed_list[new_i][new_j]:
                 # If the successor is the destination
-                if is_destination(new_i, new_j, dest):
+                if isSameVector(new_i, new_j, *dest):
                     # Set the parent of the destination cell
                     cell_details[new_i][new_j].parent_i = i
                     cell_details[new_i][new_j].parent_j = j
