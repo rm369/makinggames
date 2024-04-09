@@ -1,11 +1,12 @@
 # Star Pusher (a Sokoban clone), by Al Sweigart al@inventwithpython.com
 # (Pygame) A puzzle game where you push the stars over their goals.
 import heapq
+import pickle
 import random, sys, copy, os, pygame
 from pygame.locals import *
 import json
 
-GAMESTATEFILE = 'starPusherState.json'
+GAMESTATEFILE = 'starPusherState'
 FPS = 30  # frames per second to update the screen
 WINWIDTH = 800  # width of the program's window, in pixels
 WINHEIGHT = 600  # height in pixels
@@ -97,50 +98,64 @@ def main():
     # Read in the levels from the text file. See the readLevelsFile() for
     # details on the format of this file and how to make your own levels.
     levels = readLevelsFile('starPusherLevels.txt')
+    gameStates = {}
 
     # load game state
     try:
-        with open(GAMESTATEFILE) as f:
-            gameStateObj = json.load(f)
-        # fix tuples not supported by json
-        gameStateObj['player'] = tuple(gameStateObj['player'])
-        gameStateObj['stars'] = [tuple(xy) for xy in gameStateObj['stars']]
+        with open(f"{GAMESTATEFILE}.pickle", 'rb') as f:
+            gameStates = pickle.load(f)
     except:
-        # currentImage is the index of the player's current player image.
-        gameStateObj = initGameState(levels, 0, currentImage=1)
+        try:
+            with open(f"{GAMESTATEFILE}.json") as f:
+                gameStateObj = json.load(f)
+            # fix tuples not supported by json
+            gameStateObj['player'] = tuple(gameStateObj['player'])
+            gameStateObj['stars'] = [tuple(xy) for xy in gameStateObj['stars']]
+            gameStates['levelNum'] = gameStateObj.pop('levelNum')
+            gameStates['currentImage'] = gameStateObj.pop('currentImage')
+        except:
+            # currentImage is the index of the player's current player image.
+            gameStateObj = initGameState(levels, 0)
+            gameStates['levelNum'] = 0
+            gameStates['currentImage'] = 1
+        gameStates[gameStates['levelNum']] = gameStateObj
 
     # The main game loop. This loop runs a single level, when the user
     # finishes that level, the next/previous level is loaded.
     while True:  # main game loop
         # Run the level to actually start playing the game:
-        result = runLevel(levels, gameStateObj)
+        result = runLevel(levels, gameStates)
 
         if result in ('solved', 'next'):
             # Go to the next level.
             # If there are no more levels, go back to the first one.
-            gameStateObj['levelNum'] = (gameStateObj['levelNum'] + 1) % len(levels)
+            gameStates['levelNum'] = (gameStates['levelNum'] + 1) % len(levels)
         elif result == 'back':
             # Go to the previous level.
-            gameStateObj['levelNum'] = (gameStateObj['levelNum'] - 1) % len(levels)
+            gameStates['levelNum'] = (gameStates['levelNum'] - 1) % len(levels)
             # If there are no previous levels, go to the last one.
         elif result == 'reset':
-            pass  # Do nothing. Loop re-calls runLevel() to reset the level
+            gameStates[gameStates['levelNum']] = initGameState(levels, gameStates['levelNum'])
         elif result == 'quit':
             # save game state
-            json.dump(gameStateObj,
-                      open(GAMESTATEFILE, "w"),
+            json.dump(gameStates,
+                      open(f"{GAMESTATEFILE}_new.json", "w"),
                       indent=2)
+            with open(f"{GAMESTATEFILE}.pickle", 'wb') as f:
+                pickle.dump(gameStates, f, pickle.HIGHEST_PROTOCOL)
             terminate()
 
-        gameStateObj = initGameState(levels, gameStateObj['levelNum'],
-                                     gameStateObj['currentImage'])
+        if not gameStates['levelNum'] in gameStates:  # game state for this level already exists: use existing
+            gameStates[gameStates['levelNum']] = initGameState(levels, gameStates['levelNum'])
 
 
-def runLevel(levels, gameStateObj):
-    levelObj = levels[gameStateObj['levelNum']]
+def runLevel(levels, gameStates):
+    levelNum = gameStates['levelNum']
+    gameStateObj = gameStates[levelNum]
+    levelObj = levels[levelNum]
     mapObj = decorateMap(levelObj['mapObj'], levelObj['startState']['player'])
     mapNeedsRedraw = True  # set to True to call drawMap()
-    levelSurf = BASICFONT.render('Level %s of %s' % (gameStateObj['levelNum'] + 1, len(levels)), 1, TEXTCOLOR)
+    levelSurf = BASICFONT.render('Level %s of %s' % (levelNum + 1, len(levels)), 1, TEXTCOLOR)
     levelRect = levelSurf.get_rect()
     mapWidth, mapHeight = getMapSize(mapObj)
     MAX_CAM_Y_PAN = abs(HALF_WINHEIGHT - int(mapHeight / 2)) + TILEWIDTH
@@ -234,7 +249,7 @@ def runLevel(levels, gameStateObj):
                     return 'reset'  # Reset the level.
                 elif event.key == K_p:
                     # Change the player image to the next one.
-                    gameStateObj['currentImage'] = (gameStateObj['currentImage'] + 1) % len(PLAYERIMAGES)
+                    gameStates['currentImage'] = (gameStates['currentImage'] + 1) % len(PLAYERIMAGES)
                     mapNeedsRedraw = True
 
         if not levelIsComplete:
@@ -264,7 +279,7 @@ def runLevel(levels, gameStateObj):
         DISPLAYSURF.fill(BGCOLOR)
 
         if mapNeedsRedraw:
-            mapSurf = drawMap(mapObj, gameStateObj, levelObj['goals'], showPath)
+            mapSurf = drawMap(mapObj, gameStateObj, levelObj['goals'], showPath, gameStates['currentImage'])
             mapNeedsRedraw = False
 
         # Adjust mapSurf's Rect object based on the camera offset.
@@ -620,7 +635,7 @@ def floodFill(mapObj, x, y, oldCharacter, newCharacter):
         floodFill(mapObj, x, y - 1, oldCharacter, newCharacter)  # call up
 
 
-def drawMap(mapObj, gameStateObj, goals, showPath):
+def drawMap(mapObj, gameStateObj, goals, showPath, currentImage):
     """Draws the map to a Surface object, including the player, stars,
      and an optional path. This function does not call pygame.display.update(),
      nor does it draw the "Level" and "Steps" text in the corner.
@@ -671,7 +686,7 @@ def drawMap(mapObj, gameStateObj, goals, showPath):
                 # Note: The value "currentImage" refers
                 # to a key in "PLAYERIMAGES" which has the
                 # specific player image we want to show.
-                mapSurf.blit(PLAYERIMAGES[gameStateObj['currentImage']], spaceRect)
+                mapSurf.blit(PLAYERIMAGES[currentImage], spaceRect)
 
     return mapSurf
 
@@ -685,14 +700,12 @@ def isLevelFinished(levelObj, gameStateObj):
     return True
 
 
-def initGameState(levels, currentLevelIndex, currentImage):
+def initGameState(levels, currentLevelIndex):
     """Initialize the game state at the start of a new level.
     Returns gameStateObj."""
     gameStateObj = copy.deepcopy(levels[currentLevelIndex]['startState'])
     gameStateObj['stepCounter'] = 0
     gameStateObj['pushCounter'] = 0
-    gameStateObj['levelNum'] = currentLevelIndex
-    gameStateObj['currentImage'] = currentImage
     gameStateObj['undoStack'] = []  # both list of move list of step list
     gameStateObj['redoStack'] = []
     return gameStateObj
