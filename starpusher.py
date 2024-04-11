@@ -19,9 +19,9 @@ TILEHEIGHT = 85
 TILEFLOORHEIGHT = 40
 
 CAM_MOVE_SPEED = 10  # how many pixels per frame the camera moves
-KEYDELAY = 300       # keyboard autorepeat parameters
+KEYDELAY = 300  # keyboard autorepeat parameters
 KEYINTERVAL = 80
-FRAMERATE = 50       # framerate for player automove
+FRAMERATE = 50  # framerate for player automove
 
 # The percentage of outdoor tiles that have additional
 # decoration on them, such as a tree or rock.
@@ -98,27 +98,16 @@ def main():
     # Read in the levels from the text file. See the readLevelsFile() for
     # details on the format of this file and how to make your own levels.
     levels = readLevelsFile('starPusherLevels.txt')
-    gameStates = {}
 
     # load game state
     try:
         with open(f"{GAMESTATEFILE}.pickle", 'rb') as f:
             gameStates = pickle.load(f)
     except:
-        try:
-            with open(f"{GAMESTATEFILE}.json") as f:
-                gameStateObj = json.load(f)
-            # fix tuples not supported by json
-            gameStateObj['player'] = tuple(gameStateObj['player'])
-            gameStateObj['stars'] = [tuple(xy) for xy in gameStateObj['stars']]
-            gameStates['levelNum'] = gameStateObj.pop('levelNum')
-            gameStates['currentImage'] = gameStateObj.pop('currentImage')
-        except:
-            # currentImage is the index of the player's current player image.
-            gameStateObj = initGameState(levels, 0)
-            gameStates['levelNum'] = 0
-            gameStates['currentImage'] = 1
-        gameStates[gameStates['levelNum']] = gameStateObj
+        # no (valid) state file: initialize game state, level 0
+        gameStates = {'levelNum': 0,
+                      'currentImage': 1,
+                      0: initGameState(levels, 0)}
 
     # The main game loop. This loop runs a single level, when the user
     # finishes that level, the next/previous level is loaded.
@@ -126,7 +115,7 @@ def main():
         # Run the level to actually start playing the game:
         result = runLevel(levels, gameStates)
 
-        if result in ('solved', 'next'):
+        if result == 'next':
             # Go to the next level.
             # If there are no more levels, go back to the first one.
             gameStates['levelNum'] = (gameStates['levelNum'] + 1) % len(levels)
@@ -135,12 +124,15 @@ def main():
             gameStates['levelNum'] = (gameStates['levelNum'] - 1) % len(levels)
             # If there are no previous levels, go to the last one.
         elif result == 'reset':
-            gameStates[gameStates['levelNum']] = initGameState(levels, gameStates['levelNum'])
+            gameStateObj = gameStates[gameStates['levelNum']]
+            # preserve undo and redo stacks as new redo stack (reset as undo of all steps)
+            gameStateObj['undoStack'].reverse()
+            redoStack = gameStateObj['redoStack'] + gameStateObj['undoStack']
+            gameStateObj = initGameState(levels, gameStates['levelNum'])
+            gameStateObj['redoStack'] = redoStack
+            gameStates[gameStates['levelNum']] = gameStateObj
         elif result == 'quit':
             # save game state
-            json.dump(gameStates,
-                      open(f"{GAMESTATEFILE}_new.json", "w"),
-                      indent=2)
             with open(f"{GAMESTATEFILE}.pickle", 'wb') as f:
                 pickle.dump(gameStates, f, pickle.HIGHEST_PROTOCOL)
             terminate()
@@ -238,9 +230,9 @@ def runLevel(levels, gameStates):
                 elif event.key == K_c:  # center
                     cameraOffset = [0, 0]
 
-                elif event.key == K_n:
+                elif event.key == K_PAGEDOWN:
                     return 'next'
-                elif event.key == K_b:
+                elif event.key == K_PAGEUP:
                     return 'back'
 
                 elif event.key == K_ESCAPE:
@@ -289,23 +281,24 @@ def runLevel(levels, gameStates):
         # Draw mapSurf to the DISPLAYSURF Surface object.
         DISPLAYSURF.blit(mapSurf, mapSurfRect)
 
+        # Draw level number
         levelRect.bottomleft = (20, WINHEIGHT - 35)
         DISPLAYSURF.blit(levelSurf, levelRect)
-        stepSurf = BASICFONT.render(
-            'Steps: %s, Pushes: %s' % (gameStateObj['stepCounter'], gameStateObj['pushCounter']), 1, TEXTCOLOR)
+
+        # Draw step counters
+        stepSurfStr = 'Steps: %s, Pushes: %s' % (gameStateObj['stepCounter'], gameStateObj['pushCounter'])
+        if len(gameStateObj['redoStack']) > 0:
+            stepSurfStr += f" (Redo: {len(gameStateObj['redoStack'])})"
+        stepSurf = BASICFONT.render(stepSurfStr,1, TEXTCOLOR)
         stepRect = stepSurf.get_rect()
         stepRect.bottomleft = (20, WINHEIGHT - 10)
         DISPLAYSURF.blit(stepSurf, stepRect)
 
         if levelIsComplete:
-            # is solved, show the "Solved!" image until the player
-            # has pressed a key.
+            # is solved, show the "Solved!" image
             solvedRect = IMAGESDICT['solved'].get_rect()
             solvedRect.center = (HALF_WINWIDTH, HALF_WINHEIGHT)
             DISPLAYSURF.blit(IMAGESDICT['solved'], solvedRect)
-
-            if keyPressed:
-                return 'solved'
 
         pygame.display.update()  # draw DISPLAYSURF to the screen.
         FPSCLOCK.tick()
@@ -474,7 +467,7 @@ def drawStartScreen():
                        'Arrow keys to move, WASDC for camera control, P to change character.',
                        'U for Undo, R for Redo.',
                        'Backspace to reset level, Esc to quit.',
-                       'N for next level, B to go back a level.']
+                       'PgDown for next level, PgUp to go back a level.']
 
     # Start with drawing a blank color to the entire window:
     DISPLAYSURF.fill(BGCOLOR)
