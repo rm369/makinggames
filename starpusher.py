@@ -94,6 +94,7 @@ def main():
                     IMAGESDICT['pinkgirl']]
 
     startScreen()  # show the title screen until the user presses a key
+    pygame.key.set_repeat(KEYDELAY, KEYINTERVAL)  # enable keyboard repetition
 
     # Read in the levels from the text file. See the readLevelsFile() for
     # details on the format of this file and how to make your own levels.
@@ -191,6 +192,7 @@ def runLevel(levels, gameStates):
                 keyPressed = True
                 if path:
                     path = None  # cancel rest of path
+
                 if event.key == K_LEFT:
                     playerMoveTo = LEFT
                 elif event.key == K_RIGHT:
@@ -205,6 +207,7 @@ def runLevel(levels, gameStates):
                         applyMove(gameStateObj, move, undo=True)
                         gameStateObj['redoStack'].append(move)
                         levelIsComplete = False  # if level was solved, it is no more
+                        showPathDest = [-1, -1]
                         mapNeedsRedraw = True
                 elif event.key == K_r:  # redo
                     if gameStateObj['redoStack']:
@@ -215,7 +218,7 @@ def runLevel(levels, gameStates):
                             # level is solved, we should show the "Solved!" image.
                             levelIsComplete = True
                             keyPressed = False
-                            pygame.key.set_repeat()  # disable keyboard repetition
+                        showPathDest = [-1, -1]
                         mapNeedsRedraw = True
 
                 # Set the camera move mode.
@@ -264,9 +267,6 @@ def runLevel(levels, gameStates):
                 # level is solved, we should show the "Solved!" image.
                 levelIsComplete = True
                 keyPressed = False
-                pygame.key.set_repeat()  # disable keyboard repetition
-            else:
-                pygame.key.set_repeat(KEYDELAY, KEYINTERVAL)  # configure keyboard repetition
 
         DISPLAYSURF.fill(BGCOLOR)
 
@@ -289,7 +289,7 @@ def runLevel(levels, gameStates):
         stepSurfStr = 'Steps: %s, Pushes: %s' % (gameStateObj['stepCounter'], gameStateObj['pushCounter'])
         if len(gameStateObj['redoStack']) > 0:
             stepSurfStr += f" (Redo: {len(gameStateObj['redoStack'])})"
-        stepSurf = BASICFONT.render(stepSurfStr,1, TEXTCOLOR)
+        stepSurf = BASICFONT.render(stepSurfStr, 1, TEXTCOLOR)
         stepRect = stepSurf.get_rect()
         stepRect.bottomleft = (20, WINHEIGHT - 10)
         DISPLAYSURF.blit(stepSurf, stepRect)
@@ -492,27 +492,26 @@ def startScreen():
 
     redrawNeeded = True
     while True:  # Main loop for the start screen.
-        for event in pygame.event.get():
-            if event.type == QUIT:
+        event = pygame.event.wait()
+        if event.type == QUIT:
+            terminate()
+        elif event.type == KEYDOWN:
+            if event.key == K_ESCAPE:
                 terminate()
-            elif event.type == KEYDOWN:
-                if event.key == K_ESCAPE:
-                    terminate()
-                return  # user has pressed a key, so return.
-            elif event.type == MOUSEBUTTONDOWN:
-                return  # user has pressed a mouse button, also return.
-            elif event.type == VIDEORESIZE:
-                updateWin(event.dict['size'])
-                redrawNeeded = True
-            elif event.type == VIDEOEXPOSE:  # handles window minimising/maximising
-                updateWin(DISPLAYSURF.get_size())
-                redrawNeeded = True
+            return  # user has pressed a key, so return.
+        elif event.type == MOUSEBUTTONDOWN:
+            return  # user has pressed a mouse button, also return.
+        elif event.type == VIDEORESIZE:
+            updateWin(event.dict['size'])
+            redrawNeeded = True
+        elif event.type == VIDEOEXPOSE:  # handles window minimising/maximising
+            updateWin(DISPLAYSURF.get_size())
+            redrawNeeded = True
 
         if redrawNeeded:
             redrawNeeded = False
             drawStartScreen()
-            # Display the DISPLAYSURF contents to the actual screen.
-            pygame.display.update()
+            pygame.display.update()  # Display the DISPLAYSURF contents to the actual screen.
         FPSCLOCK.tick()
 
 
