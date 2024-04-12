@@ -150,16 +150,12 @@ def runLevel(levels, gameStates):
     mapNeedsRedraw = True  # set to True to call drawMap()
     levelSurf = BASICFONT.render('Level %s of %s' % (levelNum + 1, len(levels)), 1, TEXTCOLOR)
     levelRect = levelSurf.get_rect()
-    mapWidth, mapHeight = getMapSize(mapObj)
-    MAX_CAM_Y_PAN = abs(HALF_WINHEIGHT - int(mapHeight / 2)) + TILEWIDTH
-    MAX_CAM_X_PAN = abs(HALF_WINWIDTH - int(mapWidth / 2)) + TILEHEIGHT
 
     levelIsComplete = False
-    # Track how much the camera has moved:
-    cameraOffset = [0, 0]
     path = None  # steps to go
     showPath = None  # steps to show
     showPathDest = [-1, -1]  # last analyzed destination
+    stretchfactor = 1.0  # scale factor if map is bigger than window
 
     while True:  # main game loop
         # Reset these variables:
@@ -177,9 +173,9 @@ def runLevel(levels, gameStates):
                 updateWin(DISPLAYSURF.get_size())
                 mapNeedsRedraw = True
             elif event.type == MOUSEBUTTONDOWN and event.button == 1:
-                path = findPath(event.pos, cameraOffset, mapObj, gameStateObj)
+                path = findPath(event.pos, mapObj, gameStateObj, stretchfactor)
             elif event.type == MOUSEMOTION:
-                tilePos = mouseToTilePosition(mapObj, cameraOffset, event.pos)
+                tilePos = mouseToTilePosition(mapObj, event.pos, stretchfactor)
                 if not isSameVector(*showPathDest, *tilePos):
                     showPathDest = tilePos
                     newShowPath = a_star_search(tilePos, mapObj, gameStateObj)
@@ -221,18 +217,6 @@ def runLevel(levels, gameStates):
                         showPathDest = [-1, -1]
                         mapNeedsRedraw = True
 
-                # Set the camera move mode.
-                elif event.key == K_a:
-                    cameraOffset[0] = min(MAX_CAM_X_PAN, cameraOffset[0] + CAM_MOVE_SPEED)
-                elif event.key == K_d:
-                    cameraOffset[0] = max(-MAX_CAM_X_PAN, cameraOffset[0] - CAM_MOVE_SPEED)
-                elif event.key == K_w:
-                    cameraOffset[1] = min(MAX_CAM_Y_PAN, cameraOffset[1] + CAM_MOVE_SPEED)
-                elif event.key == K_s:
-                    cameraOffset[1] = max(-MAX_CAM_Y_PAN, cameraOffset[1] - CAM_MOVE_SPEED)
-                elif event.key == K_c:  # center
-                    cameraOffset = [0, 0]
-
                 elif event.key == K_PAGEDOWN:
                     return 'next'
                 elif event.key == K_PAGEUP:
@@ -268,39 +252,47 @@ def runLevel(levels, gameStates):
                 levelIsComplete = True
                 keyPressed = False
 
-        DISPLAYSURF.fill(BGCOLOR)
-
         if mapNeedsRedraw:
-            mapSurf = drawMap(mapObj, gameStateObj, levelObj['goals'], showPath, gameStates['currentImage'])
             mapNeedsRedraw = False
 
-        # Adjust mapSurf's Rect object based on the camera offset.
-        mapSurfRect = mapSurf.get_rect()
-        mapSurfRect.center = (HALF_WINWIDTH + cameraOffset[0], HALF_WINHEIGHT + cameraOffset[1])
+            mapSurf = drawMap(mapObj, gameStateObj, levelObj['goals'], showPath, gameStates['currentImage'])
+            mapSurfRect = mapSurf.get_rect(center=(HALF_WINWIDTH, HALF_WINHEIGHT))
 
-        # Draw mapSurf to the DISPLAYSURF Surface object.
-        DISPLAYSURF.blit(mapSurf, mapSurfRect)
+            # scale if map is bigger than window size
+            stretchfactor = min(WINWIDTH / mapSurfRect.width,
+                                WINHEIGHT / mapSurfRect.height)
+            if stretchfactor < 1.0:
+                mapSurf = pygame.transform.rotozoom(mapSurf, 0, stretchfactor)
+                mapSurfRect = mapSurf.get_rect(center=(HALF_WINWIDTH, HALF_WINHEIGHT))
+            else:
+                stretchfactor = 1.0
 
-        # Draw level number
-        levelRect.bottomleft = (20, WINHEIGHT - 35)
-        DISPLAYSURF.blit(levelSurf, levelRect)
+            DISPLAYSURF.fill(BGCOLOR)
 
-        # Draw step counters
-        stepSurfStr = 'Steps: %s, Pushes: %s' % (gameStateObj['stepCounter'], gameStateObj['pushCounter'])
-        if len(gameStateObj['redoStack']) > 0:
-            stepSurfStr += f" (Redo: {len(gameStateObj['redoStack'])})"
-        stepSurf = BASICFONT.render(stepSurfStr, 1, TEXTCOLOR)
-        stepRect = stepSurf.get_rect()
-        stepRect.bottomleft = (20, WINHEIGHT - 10)
-        DISPLAYSURF.blit(stepSurf, stepRect)
+            # Draw mapSurf to the DISPLAYSURF Surface object.
+            DISPLAYSURF.blit(mapSurf, mapSurfRect)
 
-        if levelIsComplete:
-            # is solved, show the "Solved!" image
-            solvedRect = IMAGESDICT['solved'].get_rect()
-            solvedRect.center = (HALF_WINWIDTH, HALF_WINHEIGHT)
-            DISPLAYSURF.blit(IMAGESDICT['solved'], solvedRect)
+            # Draw level number
+            levelRect.bottomleft = (20, WINHEIGHT - 35)
+            DISPLAYSURF.blit(levelSurf, levelRect)
 
-        pygame.display.update()  # draw DISPLAYSURF to the screen.
+            # Draw step counters
+            stepSurfStr = 'Steps: %s, Pushes: %s' % (gameStateObj['stepCounter'], gameStateObj['pushCounter'])
+            if len(gameStateObj['redoStack']) > 0:
+                stepSurfStr += f" (Redo: {len(gameStateObj['redoStack'])})"
+            stepSurf = BASICFONT.render(stepSurfStr, 1, TEXTCOLOR)
+            stepRect = stepSurf.get_rect()
+            stepRect.bottomleft = (20, WINHEIGHT - 10)
+            DISPLAYSURF.blit(stepSurf, stepRect)
+
+            if levelIsComplete:
+                # is solved, show the "Solved!" image
+                solvedRect = IMAGESDICT['solved'].get_rect()
+                solvedRect.center = (HALF_WINWIDTH, HALF_WINHEIGHT)
+                DISPLAYSURF.blit(IMAGESDICT['solved'], solvedRect)
+
+            pygame.display.update()  # draw DISPLAYSURF to the screen.
+
         FPSCLOCK.tick()
 
 
@@ -703,15 +695,19 @@ def initGameState(levels, currentLevelIndex):
     return gameStateObj
 
 
-def findPath(winPos, offset, mapObj, gameStateObj):
-    tilePos = mouseToTilePosition(mapObj, offset, winPos)
+def findPath(winPos, mapObj, gameStateObj, stretchfactor):
+    tilePos = mouseToTilePosition(mapObj, winPos, stretchfactor)
     return a_star_search(tilePos, mapObj, gameStateObj)
 
 
-def mouseToTilePosition(mapObj, offset, winPos):
+def mouseToTilePosition(mapObj, winPos, stretchfactor):
+    if stretchfactor < 1.0 and stretchfactor > 0.0:  # if map stretched
+        # calc virtual mouse position as if it was not stretched
+        winPos = (HALF_WINWIDTH + (winPos[0] - HALF_WINWIDTH) / stretchfactor,
+                  HALF_WINHEIGHT + (winPos[1] - HALF_WINHEIGHT) / stretchfactor)
     mapWidth, mapHeight = getMapSize(mapObj)
-    mapUpperLeft = (HALF_WINWIDTH + offset[0] - mapWidth / 2,
-                    HALF_WINHEIGHT + offset[1] - mapHeight / 2 + (TILEHEIGHT - TILEFLOORHEIGHT) / 2 + 5)
+    mapUpperLeft = (HALF_WINWIDTH - mapWidth / 2,
+                    HALF_WINHEIGHT - mapHeight / 2 + (TILEHEIGHT - TILEFLOORHEIGHT) / 2 + 5)
     mapPos = (winPos[0] - mapUpperLeft[0], winPos[1] - mapUpperLeft[1])
     return int(mapPos[0] // TILEWIDTH), int(mapPos[1] // TILEFLOORHEIGHT)
 
