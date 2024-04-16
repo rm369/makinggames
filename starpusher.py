@@ -20,7 +20,6 @@ TILEWIDTH = 50
 TILEHEIGHT = 85
 TILEFLOORHEIGHT = 40
 
-CAM_MOVE_SPEED = 10  # how many pixels per frame the camera moves
 KEYDELAY = 300  # keyboard autorepeat parameters
 KEYINTERVAL = 80
 FRAMERATE = 50  # framerate for player automove
@@ -103,10 +102,12 @@ def main():
 
     # load game state
     try:
-        with bz2.open(f"{GAMESTATEFILE}", 'rb') as f:
-            gameStates = pickle.loads(f.read())
+        with open(f"{GAMESTATEFILE}", 'rb') as f:
+            oldState = f.read()
+            gameStates = pickle.loads(bz2.decompress(oldState))
     except:
         # no (valid) state file: initialize game state, level 0
+        oldState = None
         gameStates = {'levelNum': 0,
                       'currentImage': 1,
                       0: initGameState(levels, 0)}
@@ -134,9 +135,11 @@ def main():
             gameStateObj['redoStack'] = redoStack
             gameStates[gameStates['levelNum']] = gameStateObj
         elif result == 'quit':
-            # save game state
-            with bz2.open(f"{GAMESTATEFILE}", 'wb') as f:
-                f.write(pickle.dumps(gameStates))
+            # save game state if changed
+            newState = bz2.compress(pickle.dumps(gameStates))
+            if oldState != newState:
+                with open(f"{GAMESTATEFILE}", 'wb') as f:
+                    f.write(newState)
             terminate()
 
         if not gameStates['levelNum'] in gameStates:  # game state for this level already exists: use existing
@@ -449,7 +452,7 @@ def drawStartScreen():
     # a time, so we can't use strings with \n newline characters in them.
     # So we will use a list with each line in it.
     instructionText = ['Push the stars over the marks.',
-                       'Arrow keys to move, WASDC for camera control, P to change character.',
+                       'Arrow keys to move, P to change character.',
                        'U for Undo, R for Redo.',
                        'Backspace to reset level, Esc to quit.',
                        'PgDown for next level, PgUp to go back a level.']
@@ -472,8 +475,7 @@ def drawStartScreen():
 
 
 def startScreen():
-    """Display the start screen until the player presses a key.
-    Returns None."""
+    """Display the start screen until the player presses a key."""
 
     redrawNeeded = True
     while True:  # Main loop for the start screen.
@@ -694,7 +696,7 @@ def findPath(winPos, mapObj, gameStateObj, stretchfactor):
 
 
 def mouseToTilePosition(mapObj, winPos, stretchfactor):
-    if stretchfactor < 1.0 and stretchfactor > 0.0:  # if map stretched
+    if 0.0 < stretchfactor < 1.0:  # if map stretched
         # calc virtual mouse position as if it was not stretched
         winPos = (HALF_WINWIDTH + (winPos[0] - HALF_WINWIDTH) / stretchfactor,
                   HALF_WINHEIGHT + (winPos[1] - HALF_WINHEIGHT) / stretchfactor)
