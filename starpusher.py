@@ -1,7 +1,9 @@
+#!/usr/bin/python3
+
 # Star Pusher (a Sokoban clone), by Al Sweigart al@inventwithpython.com
 # (Pygame) A puzzle game where you push the stars over their goals.
 import heapq
-import pickle
+import pickle, bz2
 import random, sys, copy, os, pygame
 from pygame.locals import *
 import json
@@ -50,37 +52,36 @@ def main():
     # Surface object that is drawn to the actual computer screen
     # when pygame.display.update() is called.
     DISPLAYSURF = pygame.display.set_mode((WINWIDTH, WINHEIGHT), RESIZABLE)
+    pygame.display.set_icon(pygame.image.load('starpusher/icon/starpusher.png'))  # change game icon
 
     pygame.display.set_caption('Star Pusher')
     BASICFONT = pygame.font.Font('freesansbold.ttf', 18)
 
     # A global dict value that will contain all the Pygame
     # Surface objects returned by pygame.image.load().
-    IMAGESDICT = {'uncovered goal': pygame.image.load('RedSelector.png'),
-                  'covered goal': pygame.image.load('Selector.png'),
-                  'star': pygame.image.load('Star.png'),
-                  # 'corner': pygame.image.load('Wall_Block_Tall.png'),
-                  'wall': pygame.image.load('Wood_Block_Tall.png'),
-                  'inside floor': pygame.image.load('Plain_Block.png'),
-                  'outside floor': pygame.image.load('Grass_Block.png'),
-                  'title': pygame.image.load('star_title.png'),
-                  'solved': pygame.image.load('star_solved.png'),
-                  'princess': pygame.image.load('princess.png'),
-                  'boy': pygame.image.load('boy.png'),
-                  'catgirl': pygame.image.load('catgirl.png'),
-                  'horngirl': pygame.image.load('horngirl.png'),
-                  'pinkgirl': pygame.image.load('pinkgirl.png'),
-                  'rock': pygame.image.load('Rock.png'),
-                  'short tree': pygame.image.load('Tree_Short.png'),
-                  'tall tree': pygame.image.load('Tree_Tall.png'),
-                  'ugly tree': pygame.image.load('Tree_Ugly.png')}
+    IMAGESDICT = {'uncovered goal': pygame.image.load('starpusher/images/RedSelector.png'),
+                  'covered goal': pygame.image.load('starpusher/images/Selector.png'),
+                  'star': pygame.image.load('starpusher/images/Star.png'),
+                  'wall': pygame.image.load('starpusher/images/Wood_Block_Tall.png'),
+                  'inside floor': pygame.image.load('starpusher/images/Plain_Block.png'),
+                  'outside floor': pygame.image.load('starpusher/images/Grass_Block.png'),
+                  'title': pygame.image.load('starpusher/images/star_title.png'),
+                  'solved': pygame.image.load('starpusher/images/star_solved.png'),
+                  'princess': pygame.image.load('starpusher/images/princess.png'),
+                  'boy': pygame.image.load('starpusher/images/boy.png'),
+                  'catgirl': pygame.image.load('starpusher/images/catgirl.png'),
+                  'horngirl': pygame.image.load('starpusher/images/horngirl.png'),
+                  'pinkgirl': pygame.image.load('starpusher/images/pinkgirl.png'),
+                  'rock': pygame.image.load('starpusher/images/Rock.png'),
+                  'short tree': pygame.image.load('starpusher/images/Tree_Short.png'),
+                  'tall tree': pygame.image.load('starpusher/images/Tree_Tall.png'),
+                  'ugly tree': pygame.image.load('starpusher/images/Tree_Ugly.png')}
 
     # These dict values are global, and map the character that appears
     # in the level file to the Surface object it represents.
-    TILEMAPPING = {  # 'x': IMAGESDICT['corner'],
-        '#': IMAGESDICT['wall'],
-        'o': IMAGESDICT['inside floor'],
-        ' ': IMAGESDICT['outside floor']}
+    TILEMAPPING = {'#': IMAGESDICT['wall'],
+                   'o': IMAGESDICT['inside floor'],
+                   ' ': IMAGESDICT['outside floor']}
     OUTSIDEDECOMAPPING = {'1': IMAGESDICT['rock'],
                           '2': IMAGESDICT['short tree'],
                           '3': IMAGESDICT['tall tree'],
@@ -102,8 +103,8 @@ def main():
 
     # load game state
     try:
-        with open(f"{GAMESTATEFILE}.pickle", 'rb') as f:
-            gameStates = pickle.load(f)
+        with bz2.open(f"{GAMESTATEFILE}", 'rb') as f:
+            gameStates = pickle.loads(f.read())
     except:
         # no (valid) state file: initialize game state, level 0
         gameStates = {'levelNum': 0,
@@ -134,8 +135,8 @@ def main():
             gameStates[gameStates['levelNum']] = gameStateObj
         elif result == 'quit':
             # save game state
-            with open(f"{GAMESTATEFILE}.pickle", 'wb') as f:
-                pickle.dump(gameStates, f, pickle.HIGHEST_PROTOCOL)
+            with bz2.open(f"{GAMESTATEFILE}", 'wb') as f:
+                f.write(pickle.dumps(gameStates))
             terminate()
 
         if not gameStates['levelNum'] in gameStates:  # game state for this level already exists: use existing
@@ -329,17 +330,9 @@ def decorateMap(mapObj, startxy):
     # Flood fill to determine inside/outside floor tiles.
     floodFill(mapObjCopy, startx, starty, ' ', 'o')
 
-    # Convert the adjoined walls into corner tiles.
+    # decorate outside
     for x in range(len(mapObjCopy)):
         for y in range(len(mapObjCopy[0])):
-            # corner shapes are more confusing than benefit
-            # if mapObjCopy[x][y] == '#':
-            #     if (isWall(mapObjCopy, x, y-1) and isWall(mapObjCopy, x+1, y)) or \
-            #        (isWall(mapObjCopy, x+1, y) and isWall(mapObjCopy, x, y+1)) or \
-            #        (isWall(mapObjCopy, x, y+1) and isWall(mapObjCopy, x-1, y)) or \
-            #        (isWall(mapObjCopy, x-1, y) and isWall(mapObjCopy, x, y-1)):
-            #         mapObjCopy[x][y] = 'x'
-            # el
             if mapObjCopy[x][y] == ' ' and random.randint(0, 99) < OUTSIDE_DECORATION_PCT:
                 mapObjCopy[x][y] = random.choice(list(OUTSIDEDECOMAPPING.keys()))
 
