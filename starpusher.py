@@ -102,9 +102,9 @@ def main():
 
     # load game state
     try:
-        with open(f"{GAMESTATEFILE}", 'rb') as f:
+        with open(GAMESTATEFILE, 'rb') as f:
             oldState = f.read()
-            gameStates = pickle.loads(bz2.decompress(oldState))
+        gameStates = pickle.loads(bz2.decompress(oldState))
     except:
         # no (valid) state file: initialize game state, level 0
         oldState = None
@@ -119,13 +119,11 @@ def main():
         result = runLevel(levels, gameStates)
 
         if result == 'next':
-            # Go to the next level.
-            # If there are no more levels, go back to the first one.
+            # Go to the next level. If there are no more levels, go back to the first one.
             gameStates['levelNum'] = (gameStates['levelNum'] + 1) % len(levels)
         elif result == 'back':
-            # Go to the previous level.
+            # Go to the previous level. If there is no previous level, go to the last one.
             gameStates['levelNum'] = (gameStates['levelNum'] - 1) % len(levels)
-            # If there are no previous levels, go to the last one.
         elif result == 'reset':
             gameStateObj = gameStates[gameStates['levelNum']]
             # preserve undo and redo stacks as new redo stack (reset as undo of all steps)
@@ -138,7 +136,7 @@ def main():
             # save game state if changed
             newState = bz2.compress(pickle.dumps(gameStates))
             if oldState != newState:
-                with open(f"{GAMESTATEFILE}", 'wb') as f:
+                with open(GAMESTATEFILE, 'wb') as f:
                     f.write(newState)
             terminate()
 
@@ -163,8 +161,7 @@ def runLevel(levels, gameStates):
 
     while True:  # main game loop
         # Reset these variables:
-        playerMoveTo = None
-        keyPressed = False
+        playerMoveTo = []
 
         for event in pygame.event.get():  # event handling loop
             if event.type == QUIT:
@@ -189,7 +186,6 @@ def runLevel(levels, gameStates):
 
             elif event.type == KEYDOWN:
                 # Handle key presses
-                keyPressed = True
                 if path:
                     path = None  # cancel rest of path
 
@@ -242,7 +238,7 @@ def runLevel(levels, gameStates):
                 playerMoveTo = step[0] - playerPos[0], step[1] - playerPos[1]
                 FPSCLOCK.tick(FRAMERATE)
 
-            if playerMoveTo is not None:
+            if playerMoveTo:
                 # If the player pushed a key to move, make the move
                 # (if possible) and push any stars that are pushable.
                 moved = makeMove(mapObj, gameStateObj, playerMoveTo)
@@ -375,35 +371,34 @@ def makeMove(mapObj, gameStateObj, playerMoveTo):
     # The code for handling each of the directions is so similar aside
     # from adding or subtracting 1 to the x/y coordinates. We can
     # simplify it by using the xOffset and yOffset variables.
-    if playerMoveTo is None: return False
     xOffset, yOffset = playerMoveTo
-    if xOffset == 0 and yOffset == 0: return False
+    if xOffset == 0 and yOffset == 0:
+        return False
 
     # See if the player can move in that direction.
     if isWall(mapObj, playerx + xOffset, playery + yOffset):
         return False
-    else:
-        # a move is a list (1..2) of step lists (xold, yold, xnew, ynew, index)
-        # index is stars index, -1 for player
-        move = []
-        if (playerx + xOffset, playery + yOffset) in stars:
-            # There is a star in the way, see if the player can push it.
-            if not isBlocked(mapObj, gameStateObj, playerx + (xOffset * 2), playery + (yOffset * 2)):
-                # Move the star.
-                ind = stars.index((playerx + xOffset, playery + yOffset))
-                move.append([playerx + xOffset, playery + yOffset,  # old position
-                             playerx + 2 * xOffset, playery + 2 * yOffset,  # new position
-                             ind])
-            else:
-                return False
-        # Move the player
-        move.append([playerx, playery,  # old position
-                     playerx + xOffset, playery + yOffset,  # new position
-                     -1])  # index=-1 for player
-        applyMove(gameStateObj, move)
-        gameStateObj['undoStack'].append(move)
-        gameStateObj['redoStack'].clear()  # new move, no more redo
-        return True
+
+    # a move is a list (1..2) of step lists (xold, yold, xnew, ynew, index)
+    # index is stars index, -1 for player
+    move = []
+    if (playerx + xOffset, playery + yOffset) in stars:
+        # There is a star in the way, see if the player can push it.
+        if not isBlocked(mapObj, gameStateObj, playerx + (xOffset * 2), playery + (yOffset * 2)):
+            # Move the star.
+            move.append([playerx + xOffset, playery + yOffset,  # old position
+                         playerx + 2 * xOffset, playery + 2 * yOffset,  # new position
+                         stars.index((playerx + xOffset, playery + yOffset))])
+        else:
+            return False
+    # Move the player
+    move.append([playerx, playery,  # old position
+                 playerx + xOffset, playery + yOffset,  # new position
+                 -1])  # index=-1 for player
+    applyMove(gameStateObj, move)
+    gameStateObj['undoStack'].append(move)
+    gameStateObj['redoStack'].clear()  # new move, no more redo
+    return True
 
 
 def applyMove(gameStateObj, move, undo=False):
