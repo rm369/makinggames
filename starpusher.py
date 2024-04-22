@@ -6,7 +6,6 @@ import heapq
 import pickle, bz2
 import random, sys, copy, os, pygame
 from pygame.locals import *
-import json
 
 GAMESTATEFILE = 'starPusherState'
 FPS = 30  # frames per second to update the screen
@@ -213,7 +212,6 @@ def runLevel(levels, gameStates):
                         if isLevelFinished(levelObj, gameStateObj):
                             # level is solved, we should show the "Solved!" image.
                             levelIsComplete = True
-                            keyPressed = False
                         showPathDest = [-1, -1]
                         mapNeedsRedraw = True
 
@@ -250,7 +248,6 @@ def runLevel(levels, gameStates):
             if isLevelFinished(levelObj, gameStateObj):
                 # level is solved, we should show the "Solved!" image.
                 levelIsComplete = True
-                keyPressed = False
 
         if mapNeedsRedraw:
             mapNeedsRedraw = False
@@ -498,7 +495,7 @@ def startScreen():
 
 
 def readLevelsFile(filename):
-    assert os.path.exists(filename), 'Cannot find the level file: %s' % (filename)
+    assert os.path.exists(filename), 'Cannot find the level file: %s' % filename
     mapFile = open(filename, 'r')
     # Each level must end with a blank line
     content = mapFile.readlines() + ['\r\n']
@@ -513,7 +510,7 @@ def readLevelsFile(filename):
         line = content[lineNum].rstrip('\r\n')
 
         if ';' in line:
-            # Ignore the ; lines, they're comments in the level file.
+            # Ignore everything after and including ";" (comments)
             line = line[:line.find(';')]
 
         if line != '':
@@ -533,7 +530,7 @@ def readLevelsFile(filename):
             for i in range(len(mapTextLines)):
                 mapTextLines[i] += ' ' * (maxWidth - len(mapTextLines[i]))
 
-            # Convert mapTextLines to a map object.
+            # Convert mapTextLines to a map object, mirroring x and y (landscape screen orientation)
             for x in range(len(mapTextLines[0])):
                 mapObj.append([])
             for y in range(len(mapTextLines)):
@@ -560,13 +557,15 @@ def readLevelsFile(filename):
                         stars.append((x, y))
 
             # Basic level design sanity checks:
-            assert startx != None and starty != None, 'Level %s (around line %s) in %s is missing a "@" or "+" to mark the start point.' % (
-                levelNum + 1, lineNum, filename)
-            assert len(goals) > 0, 'Level %s (around line %s) in %s must have at least one goal.' % (
-                levelNum + 1, lineNum, filename)
-            assert len(stars) >= len(
-                goals), 'Level %s (around line %s) in %s is impossible to solve. It has %s goals but only %s stars.' % (
-                levelNum + 1, lineNum, filename, len(goals), len(stars))
+            assert startx is not None and starty is not None, (
+                f'Level {levelNum + 1} (around line {lineNum}) in {filename} '
+                f'is missing a "@" or "+" to mark the start point.')
+            assert len(goals) > 0, (
+                f'Level {levelNum + 1} (around line {lineNum}) in {filename} '
+                f'must have at least one goal.')
+            assert len(stars) >= len(goals), (
+                f'Level {levelNum + 1} (around line {lineNum}) in {filename} '
+                f'is impossible to solve. It has {len(goals)} goals but only {len(stars)} stars.')
 
             # Create level object and starting game state object.
             gameStateObj = {'player': (startx, starty),
@@ -582,7 +581,6 @@ def readLevelsFile(filename):
             # Reset the variables for reading the next map.
             mapTextLines = []
             mapObj = []
-            gameStateObj = {}
             levelNum += 1
     return levels
 
@@ -632,6 +630,8 @@ def drawMap(mapObj, gameStateObj, goals, showPath, currentImage):
                 baseTile = TILEMAPPING[mapObj[x][y]]
             elif mapObj[x][y] in OUTSIDEDECOMAPPING:
                 baseTile = TILEMAPPING[' ']
+            else:
+                raise ValueError("unexpected map tile")  # can't happen, just to get rid of warning
 
             # First draw the base ground/wall tile.
             mapSurf.blit(baseTile, spaceRect)
@@ -741,7 +741,7 @@ def trace_path(cell_details, dest):
     # Add the source cell to the path
     path.append((row, col))
     # Reverse the path to get the path from source to destination
-    # path.reverse()  # already done by switching src and dest
+    # path.reverse()  # already done by using pop()
     return path
 
 
@@ -784,9 +784,9 @@ def a_star_search(dest, mapObj, gameStateObj):
         closed_list[i][j] = True
 
         # For each direction, check the successors
-        for dir in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-            new_i = i + dir[0]
-            new_j = j + dir[1]
+        for direction in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            new_i = i + direction[0]
+            new_j = j + direction[1]
 
             # If the successor is valid, unblocked, and not visited
             if not isBlocked(mapObj, gameStateObj, new_i, new_j) and not closed_list[new_i][new_j]:
