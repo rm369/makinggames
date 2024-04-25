@@ -53,16 +53,19 @@ def get_arguments():
     )
     parser.add_argument(
         "--states",
+        metavar="file(s)",
         help=f"Comma separated list of state files to import (default: {GAMESTATEFILE})",
         default=GAMESTATEFILE
     )
     parser.add_argument(
         "--savestates",
+        metavar="file",
         help=f"State file to save (default: {GAMESTATEFILE})",
         default=GAMESTATEFILE
     )
     parser.add_argument(
         "--levels",
+        metavar="file(s)/folder(s)",
         help=f"Comma separated list of level files or folders to import (default: {LEVELSFILE})",
         default=LEVELSFILE
     )
@@ -158,18 +161,6 @@ def main():
                     gameStates['levels'][levelHash] = states['levels'][levelHash]
             else:  # first file: get level states and other info
                 gameStates = states
-
-        if "levels" not in gameStates:  # convert from old format
-            gameStates['levels'] = {}
-            for k in list(gameStates.keys()):
-                if k not in ['levelNum', 'currentImage', 'levels']:
-                    if k < len(levels):
-                        levelHash = levels[int(k)]['hash']
-                        gameStates['levels'][levelHash] = gameStates[k]
-                        del gameStates[k]
-                    else:
-                        print(f"Unknown level {k}")
-            gameStates['levelHash'] = levels[gameStates['levelNum']]['hash']
 
         if "levelHash" in gameStates and gameStates['levelHash'] in dictHash2level:
             # update level number according to hash (may be at a different position)
