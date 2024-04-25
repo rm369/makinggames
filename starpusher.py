@@ -1,13 +1,21 @@
 #!/usr/bin/python3
-
 # Star Pusher (a Sokoban clone), by Al Sweigart al@inventwithpython.com
 # (Pygame) A puzzle game where you push the stars over their goals.
+import argparse
+import bz2
+import copy
+import hashlib
 import heapq
-import pickle, bz2
-import random, sys, copy, os, pygame
+import os
+import pickle
+import pygame
+import random
+import sys
+
 from pygame.locals import *
 
-GAMESTATEFILE = 'starPusherState'
+LEVELSFILE = 'starpusher/levels'  # 'starPusherLevels.txt'
+GAMESTATEFILE = str(os.path.expanduser("~")) + "/.starpusherstate"  # 'starPusherState'
 FPS = 30  # frames per second to update the screen
 WINWIDTH = 800  # width of the program's window, in pixels
 WINHEIGHT = 600  # height in pixels
@@ -38,8 +46,47 @@ LEFT = (-1, 0)
 RIGHT = (1, 0)
 
 
+def get_arguments():
+    """get and process command line arguments"""
+    parser = argparse.ArgumentParser(
+        description="Star Pusher, a Sokoban clone"
+    )
+    parser.add_argument(
+        "--states",
+        help=f"Comma separated list of state files to import (default: {GAMESTATEFILE})",
+        default=GAMESTATEFILE
+    )
+    parser.add_argument(
+        "--savestates",
+        help=f"State file to save (default: {GAMESTATEFILE})",
+        default=GAMESTATEFILE
+    )
+    parser.add_argument(
+        "--levels",
+        help=f"Comma separated list of level files or folders to import (default: {LEVELSFILE})",
+        default=LEVELSFILE
+    )
+    args = parser.parse_args()
+
+    # process arguments
+    args.states = args.states.split(",")  # split to list of state files to import
+    levels = []
+    for item in args.levels.split(","):
+        if os.path.isfile(item):  # add single file
+            levels.append(item)
+        elif os.path.isdir(item):  # add all files in folder
+            levels += [f"{item}/{f}" for f in sorted(os.listdir(item)) if os.path.isfile(f"{item}/{f}")]
+        else:
+            raise FileNotFoundError(f"Level file {item} not found!")
+    args.levels = levels
+
+    return args
+
+
 def main():
     global FPSCLOCK, DISPLAYSURF, IMAGESDICT, TILEMAPPING, OUTSIDEDECOMAPPING, BASICFONT, PLAYERIMAGES
+
+    args = get_arguments()  # get and process command line arguments
 
     # Pygame initialization and basic set up of the global variables.
     pygame.init()
@@ -92,28 +139,63 @@ def main():
                     IMAGESDICT['horngirl'],
                     IMAGESDICT['pinkgirl']]
 
-    startScreen()  # show the title screen until the user presses a key
-    pygame.key.set_repeat(KEYDELAY, KEYINTERVAL)  # enable keyboard repetition
-
     # Read in the levels from the text file. See the readLevelsFile() for
     # details on the format of this file and how to make your own levels.
-    levels = readLevelsFile('starPusherLevels.txt')
+    levels, dictHash2level = readLevelsFiles(args.levels)
+
+    startScreen(f"Loaded {len(levels)} levels.")  # show the title screen and wait
+    pygame.key.set_repeat(KEYDELAY, KEYINTERVAL)  # enable keyboard repetition
 
     # load game state
     try:
-        with open(GAMESTATEFILE, 'rb') as f:
-            oldState = f.read()
-        gameStates = pickle.loads(bz2.decompress(oldState))
+        gameStates = {}
+        for filename in args.states:
+            with open(filename, 'rb') as f:
+                oldState = f.read()
+            states = pickle.loads(bz2.decompress(oldState))
+            if gameStates:  # further files: copy/overwrite level states
+                for levelHash in states['levels']:
+                    gameStates['levels'][levelHash] = states['levels'][levelHash]
+            else:  # first file: get level states and other info
+                gameStates = states
+
+        if "levels" not in gameStates:  # convert from old format
+            gameStates['levels'] = {}
+            for k in list(gameStates.keys()):
+                if k not in ['levelNum', 'currentImage', 'levels']:
+                    if k < len(levels):
+                        levelHash = levels[int(k)]['hash']
+                        gameStates['levels'][levelHash] = gameStates[k]
+                        del gameStates[k]
+                    else:
+                        print(f"Unknown level {k}")
+            gameStates['levelHash'] = levels[gameStates['levelNum']]['hash']
+
+        if "levelHash" in gameStates and gameStates['levelHash'] in dictHash2level:
+            # update level number according to hash (may be at a different position)
+            gameStates['levelNum'] = dictHash2level[gameStates['levelHash']]
+        else:
+            # if the last played level (according to hash) is currently not loaded, start with first level
+            print(f"Last played level not in loaded levels, starting with level 1")
+            gameStates['levelNum'] = 0
+            levelHash = levels[gameStates['levelNum']]['hash']
+            if levelHash not in gameStates['levels']:  # game state for this level already exists: use existing
+                gameStates['levels'][levelHash] = initGameState(levels, gameStates['levelNum'])
+
     except:
         # no (valid) state file: initialize game state, level 0
         oldState = None
         gameStates = {'levelNum': 0,
                       'currentImage': 1,
-                      0: initGameState(levels, 0)}
+                      'levels': {
+                          levels[0]['hash']: initGameState(levels, 0)}
+                      }
 
     # The main game loop. This loop runs a single level, when the user
     # finishes that level, the next/previous level is loaded.
     while True:  # main game loop
+        gameStates['levelHash'] = levels[gameStates['levelNum']]['hash']  # update hash of current level
+
         # Run the level to actually start playing the game:
         result = runLevel(levels, gameStates)
 
@@ -124,32 +206,35 @@ def main():
             # Go to the previous level. If there is no previous level, go to the last one.
             gameStates['levelNum'] = (gameStates['levelNum'] - 1) % len(levels)
         elif result == 'reset':
-            gameStateObj = gameStates[gameStates['levelNum']]
+            gameStateObj = gameStates['levels'][gameStates['levelHash']]
             # preserve undo and redo stacks as new redo stack (reset as undo of all steps)
             gameStateObj['undoStack'].reverse()
             redoStack = gameStateObj['redoStack'] + gameStateObj['undoStack']
             gameStateObj = initGameState(levels, gameStates['levelNum'])
             gameStateObj['redoStack'] = redoStack
-            gameStates[gameStates['levelNum']] = gameStateObj
+            gameStates['levels'][gameStates['levelHash']] = gameStateObj
         elif result == 'quit':
             # save game state if changed
             newState = bz2.compress(pickle.dumps(gameStates))
             if oldState != newState:
-                with open(GAMESTATEFILE, 'wb') as f:
+                with open(args.savestates, 'wb') as f:
                     f.write(newState)
             terminate()
 
-        if not gameStates['levelNum'] in gameStates:  # game state for this level already exists: use existing
-            gameStates[gameStates['levelNum']] = initGameState(levels, gameStates['levelNum'])
+        levelHash = levels[gameStates['levelNum']]['hash']
+        if levelHash not in gameStates['levels']:  # game state for this level already exists: use existing
+            gameStates['levels'][levelHash] = initGameState(levels, gameStates['levelNum'])
 
 
 def runLevel(levels, gameStates):
     levelNum = gameStates['levelNum']
-    gameStateObj = gameStates[levelNum]
+    gameStateObj = gameStates['levels'][gameStates['levelHash']]
     levelObj = levels[levelNum]
     mapObj = decorateMap(levelObj['mapObj'], levelObj['startState']['player'])
     mapNeedsRedraw = True  # set to True to call drawMap()
-    levelSurf = BASICFONT.render('Level %s of %s' % (levelNum + 1, len(levels)), 1, TEXTCOLOR)
+    levelSurf = BASICFONT.render(f"Level {levelNum + 1} of {len(levels)}"
+                                 f" ({os.path.basename(levels[levelNum]['filename'])} #{levels[levelNum]['lastComment']})",
+                                 1, TEXTCOLOR)
     levelRect = levelSurf.get_rect()
 
     levelIsComplete = False
@@ -429,7 +514,7 @@ def updateWin(size):
     HALF_WINHEIGHT = int(WINHEIGHT / 2)
 
 
-def drawStartScreen():
+def drawStartScreen(message):
     """Draw the start screen (which has the title and instructions)
     Returns None."""
 
@@ -448,6 +533,9 @@ def drawStartScreen():
                        'U for Undo, R for Redo.',
                        'Backspace to reset level, Esc to quit.',
                        'PgDown for next level, PgUp to go back a level.']
+    
+    if message:  # add optional text
+        instructionText.append(message)
 
     # Start with drawing a blank color to the entire window:
     DISPLAYSURF.fill(BGCOLOR)
@@ -466,7 +554,7 @@ def drawStartScreen():
         DISPLAYSURF.blit(instSurf, instRect)
 
 
-def startScreen():
+def startScreen(message):
     """Display the start screen until the player presses a key."""
 
     redrawNeeded = True
@@ -489,100 +577,120 @@ def startScreen():
 
         if redrawNeeded:
             redrawNeeded = False
-            drawStartScreen()
+            drawStartScreen(message)
             pygame.display.update()  # Display the DISPLAYSURF contents to the actual screen.
         FPSCLOCK.tick()
 
 
-def readLevelsFile(filename):
-    assert os.path.exists(filename), 'Cannot find the level file: %s' % filename
-    mapFile = open(filename, 'r')
-    # Each level must end with a blank line
-    content = mapFile.readlines() + ['\r\n']
-    mapFile.close()
-
+def readLevelsFiles(filenames):
     levels = []  # Will contain a list of level objects.
     levelNum = 0
-    mapTextLines = []  # contains the lines for a single level's map.
-    mapObj = []  # the map object made from the data in mapTextLines
-    for lineNum in range(len(content)):
-        # Process each line that was in the level file.
-        line = content[lineNum].rstrip('\r\n')
+    levelHashes = {}  # dict hash to level number
 
-        if ';' in line:
-            # Ignore everything after and including ";" (comments)
-            line = line[:line.find(';')]
+    for filename in filenames:
+        assert os.path.exists(filename), 'Cannot find the level file: %s' % filename
+        mapFile = open(filename, 'r')
+        # Each level must end with a blank line
+        content = mapFile.readlines() + ['\r\n']
+        mapFile.close()
 
-        if line != '':
-            # This line is part of the map.
-            mapTextLines.append(line)
-        elif line == '' and len(mapTextLines) > 0:
-            # A blank line indicates the end of a level's map in the file.
-            # Convert the text in mapTextLines into a level object.
+        levelNumInFile = 1
+        mapTextLines = []  # contains the lines for a single level's map.
+        mapObj = []  # the map object made from the data in mapTextLines
+        lastComment = ""
+        for lineNum in range(len(content)):
+            # Process each line that was in the level file.
+            line = content[lineNum].rstrip('\r\n')
 
-            # Find the longest row in the map.
-            maxWidth = -1
-            for i in range(len(mapTextLines)):
-                if len(mapTextLines[i]) > maxWidth:
-                    maxWidth = len(mapTextLines[i])
-            # Add spaces to the ends of the shorter rows. This
-            # ensures the map will be rectangular.
-            for i in range(len(mapTextLines)):
-                mapTextLines[i] += ' ' * (maxWidth - len(mapTextLines[i]))
+            if ';' in line:
+                # Ignore everything after and including ";" (comments)
+                semicolon = line.find(';')
+                lastComment = line[semicolon+1:].strip()  # remember last comment as title
+                line = line[:semicolon]
 
-            # Convert mapTextLines to a map object, mirroring x and y (landscape screen orientation)
-            for x in range(len(mapTextLines[0])):
-                mapObj.append([])
-            for y in range(len(mapTextLines)):
+            if line != '':
+                # This line is part of the map.
+                mapTextLines.append(line)
+            elif line == '' and len(mapTextLines) > 0:
+                # A blank line indicates the end of a level's map in the file.
+                # Convert the text in mapTextLines into a level object.
+
+                # Find the longest row in the map.
+                maxWidth = -1
+                for i in range(len(mapTextLines)):
+                    if len(mapTextLines[i]) > maxWidth:
+                        maxWidth = len(mapTextLines[i])
+                # Add spaces to the ends of the shorter rows. This
+                # ensures the map will be rectangular.
+                levelString = ""
+                for i in range(len(mapTextLines)):
+                    mapTextLines[i] += ' ' * (maxWidth - len(mapTextLines[i]))
+                    levelString += mapTextLines[i]
+
+                levelHash = hashlib.md5(levelString.encode()).hexdigest()  # calculate unambiguous hash for level
+                # if levelHash in levelHashes:
+                #     print(f"WARNING: Level {levelNum} file {filename} seems to be identical to level {levelHashes[levelHash]}, hash {levelHash}!")
+                levelHashes[levelHash] = levelNum
+
+                # Convert mapTextLines to a map object, mirroring x and y (landscape screen orientation)
+                for x in range(len(mapTextLines[0])):
+                    mapObj.append([])
+                for y in range(len(mapTextLines)):
+                    for x in range(maxWidth):
+                        mapObj[x].append(mapTextLines[y][x])
+
+                # Loop through the spaces in the map and find the @, ., and $
+                # characters for the starting game state.
+                startx = None  # The x and y for the player's starting position
+                starty = None
+                goals = []  # list of (x, y) tuples for each goal.
+                stars = []  # list of (x, y) for each star's starting position.
                 for x in range(maxWidth):
-                    mapObj[x].append(mapTextLines[y][x])
+                    for y in range(len(mapObj[x])):
+                        if mapObj[x][y] in ('@', '+'):
+                            # '@' is player, '+' is player & goal
+                            startx = x
+                            starty = y
+                        if mapObj[x][y] in ('.', '+', '*'):
+                            # '.' is goal, '*' is star & goal
+                            goals.append((x, y))
+                        if mapObj[x][y] in ('$', '*'):
+                            # '$' is star
+                            stars.append((x, y))
 
-            # Loop through the spaces in the map and find the @, ., and $
-            # characters for the starting game state.
-            startx = None  # The x and y for the player's starting position
-            starty = None
-            goals = []  # list of (x, y) tuples for each goal.
-            stars = []  # list of (x, y) for each star's starting position.
-            for x in range(maxWidth):
-                for y in range(len(mapObj[x])):
-                    if mapObj[x][y] in ('@', '+'):
-                        # '@' is player, '+' is player & goal
-                        startx = x
-                        starty = y
-                    if mapObj[x][y] in ('.', '+', '*'):
-                        # '.' is goal, '*' is star & goal
-                        goals.append((x, y))
-                    if mapObj[x][y] in ('$', '*'):
-                        # '$' is star
-                        stars.append((x, y))
+                # Basic level design sanity checks:
+                assert startx is not None and starty is not None, (
+                    f'Level {levelNum + 1} (around line {lineNum}) in {filename} '
+                    f'is missing a "@" or "+" to mark the start point.')
+                assert len(goals) > 0, (
+                    f'Level {levelNum + 1} (around line {lineNum}) in {filename} '
+                    f'must have at least one goal.')
+                assert len(stars) >= len(goals), (
+                    f'Level {levelNum + 1} (around line {lineNum}) in {filename} '
+                    f'is impossible to solve. It has {len(goals)} goals but only {len(stars)} stars.')
 
-            # Basic level design sanity checks:
-            assert startx is not None and starty is not None, (
-                f'Level {levelNum + 1} (around line {lineNum}) in {filename} '
-                f'is missing a "@" or "+" to mark the start point.')
-            assert len(goals) > 0, (
-                f'Level {levelNum + 1} (around line {lineNum}) in {filename} '
-                f'must have at least one goal.')
-            assert len(stars) >= len(goals), (
-                f'Level {levelNum + 1} (around line {lineNum}) in {filename} '
-                f'is impossible to solve. It has {len(goals)} goals but only {len(stars)} stars.')
+                # Create level object and starting game state object.
+                gameStateObj = {'player': (startx, starty),
+                                'stars': stars}
+                levelObj = {'width': maxWidth,
+                            'height': len(mapObj),
+                            'mapObj': mapObj,
+                            'goals': goals,
+                            'startState': gameStateObj,
+                            'filename': filename,
+                            'levelInFile': levelNumInFile,
+                            'lastComment': lastComment,
+                            'hash': levelHash}
 
-            # Create level object and starting game state object.
-            gameStateObj = {'player': (startx, starty),
-                            'stars': stars}
-            levelObj = {'width': maxWidth,
-                        'height': len(mapObj),
-                        'mapObj': mapObj,
-                        'goals': goals,
-                        'startState': gameStateObj}
+                levels.append(levelObj)
 
-            levels.append(levelObj)
+                # Reset the variables for reading the next map.
+                mapTextLines = []
+                mapObj = []
+                levelNumInFile += 1
+                levelNum += 1
 
-            # Reset the variables for reading the next map.
-            mapTextLines = []
-            mapObj = []
-            levelNum += 1
-    return levels
+    return levels, levelHashes
 
 
 def floodFill(mapObj, x, y, oldCharacter, newCharacter):
