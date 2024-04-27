@@ -146,7 +146,9 @@ def main():
     # details on the format of this file and how to make your own levels.
     levels, dictHash2level = readLevelsFiles(args.levels)
 
-    startScreen(f"Loaded {len(levels)} levels.")  # show the title screen and wait
+    # show the title screen with number of levels and wait
+    startScreen(f"Loaded {len(levels)} levels.")
+
     pygame.key.set_repeat(KEYDELAY, KEYINTERVAL)  # enable keyboard repetition
 
     # load game state
@@ -159,33 +161,33 @@ def main():
             if gameStates:  # further files: copy/overwrite level states
                 for levelHash in states['levels']:
                     gameStates['levels'][levelHash] = states['levels'][levelHash]
+                oldState = None  # multiple files: save even if new state is any imported state
             else:  # first file: get level states and other info
                 gameStates = states
 
-        if "levelHash" in gameStates and gameStates['levelHash'] in dictHash2level:
+        if gameStates['levelHash'] in dictHash2level:
             # update level number according to hash (may be at a different position)
             gameStates['levelNum'] = dictHash2level[gameStates['levelHash']]
         else:
             # if the last played level (according to hash) is currently not loaded, start with first level
             print(f"Last played level not in loaded levels, starting with level 1")
             gameStates['levelNum'] = 0
-            levelHash = levels[gameStates['levelNum']]['hash']
-            if levelHash not in gameStates['levels']:  # game state for this level already exists: use existing
-                gameStates['levels'][levelHash] = initGameState(levels, gameStates['levelNum'])
 
     except:
         # no (valid) state file: initialize game state, level 0
         oldState = None
         gameStates = {'levelNum': 0,
-                      'currentImage': 1,
-                      'levels': {
-                          levels[0]['hash']: initGameState(levels, 0)}
+                      'currentImage': 1,  # start with image 1 (I don't like 0)
+                      'levels': {}
                       }
 
     # The main game loop. This loop runs a single level, when the user
     # finishes that level, the next/previous level is loaded.
     while True:  # main game loop
-        gameStates['levelHash'] = levels[gameStates['levelNum']]['hash']  # update hash of current level
+        levelHash = levels[gameStates['levelNum']]['hash']  # get hash of current level
+        if levelHash not in gameStates['levels']:  # create game state for this level if not existing
+            gameStates['levels'][levelHash] = initGameState(levels, gameStates['levelNum'])
+        gameStates['levelHash'] = levelHash  # update hash of current level
 
         # Run the level to actually start playing the game:
         result = runLevel(levels, gameStates)
@@ -211,10 +213,6 @@ def main():
                 with open(args.savestates, 'wb') as f:
                     f.write(newState)
             terminate()
-
-        levelHash = levels[gameStates['levelNum']]['hash']
-        if levelHash not in gameStates['levels']:  # game state for this level already exists: use existing
-            gameStates['levels'][levelHash] = initGameState(levels, gameStates['levelNum'])
 
 
 def runLevel(levels, gameStates):
