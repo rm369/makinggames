@@ -210,6 +210,7 @@ def main():
             # save game state if changed
             newState = bz2.compress(pickle.dumps(gameStates))
             if oldState != newState:
+                print(f"Game state changed, saving...")
                 with open(args.savestates, 'wb') as f:
                     f.write(newState)
             terminate()
@@ -246,8 +247,11 @@ def runLevel(levels, gameStates):
             elif event.type == VIDEOEXPOSE:  # handles window minimising/maximising
                 updateWin(DISPLAYSURF.get_size())
                 mapNeedsRedraw = True
-            elif event.type == MOUSEBUTTONDOWN and event.button == 1:
-                path = findPath(event.pos, mapObj, gameStateObj, stretchfactor)
+            elif (event.type == MOUSEBUTTONDOWN):
+                if event.button == 1:
+                    path = findPath(event.pos, mapObj, gameStateObj, stretchfactor)
+                elif event.button == 3:
+                    path = moveStar(event.pos, mapObj, gameStateObj, stretchfactor)
             elif event.type == MOUSEMOTION:
                 tilePos = mouseToTilePosition(mapObj, event.pos, stretchfactor)
                 if not isSameVector(*showPathDest, *tilePos):
@@ -780,6 +784,39 @@ def initGameState(levels, currentLevelIndex):
     gameStateObj['undoStack'] = []  # both list of move list of step list
     gameStateObj['redoStack'] = []
     return gameStateObj
+
+
+def moveStar(winPos, mapObj, gameStateObj, stretchfactor):
+    dest = mouseToTilePosition(mapObj, winPos, stretchfactor)
+    src = gameStateObj['player']
+    path = []
+    dx = 0
+    dy = 0
+    if dest[0] == src[0]:  # same column
+        dy = -1
+        if dest[1] == src[1]:  # src=dest
+            return None
+        elif dest[1] > src[1]:
+            dy = 1
+    elif dest[1] == src[1]:  # same row
+        dx = -1
+        if dest[0] > src[0]:
+            dx = 1
+    px = src[0] + dx  # start search position
+    py = src[1] + dy
+    if (px, py) not in gameStateObj['stars']:
+        return None  # next tile must be star
+    if (dest[0], dest[1]) == (px, py):
+        return None  # next tile must not be destination
+    while True:
+        path.append((px, py))
+        px += dx
+        py += dy
+        if isBlocked(mapObj, gameStateObj, px, py):
+            return None  # no free path to destination
+        if (px, py) == (dest[0], dest[1]):
+            path.reverse()  # Reverse the path to get the inverted path from source to destination
+            return path
 
 
 def findPath(winPos, mapObj, gameStateObj, stretchfactor):

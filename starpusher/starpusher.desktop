@@ -1,7 +1,9 @@
 [Desktop Entry]
-Type	=	Application
-Name	=	StarPusher
-Comment =       A Sokoban Clone By Al Sweigart
-Path    =       /home/roland/src/python/makinggames
-Exec	=	python3 /home/roland/src/python/makinggames/starpusher.py
-Icon    =       /home/roland/src/python/makinggames/starpusher/icon/starpusher.png
+Type=Application
+Name=StarPusher
+Comment=A Sokoban Clone By Al Sweigart
+Path=/home/roland/src/python/makinggames
+Exec=python3 starpusher.py
+Icon=starpusher
+Categories=Game;
+Terminal=false
