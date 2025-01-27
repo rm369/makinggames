@@ -790,18 +790,19 @@ def moveStar(winPos, mapObj, gameStateObj, stretchfactor):
     dest = mouseToTilePosition(mapObj, winPos, stretchfactor)
     src = gameStateObj['player']
     path = []
-    dx = 0
-    dy = 0
+    dx = dy = 0
     if dest[0] == src[0]:  # same column
         dy = -1
         if dest[1] == src[1]:  # src=dest
-            return None
+            return None  # click on player
         elif dest[1] > src[1]:
             dy = 1
     elif dest[1] == src[1]:  # same row
         dx = -1
         if dest[0] > src[0]:
             dx = 1
+    else:
+        return None  # neither same row nor column
     px = src[0] + dx  # start search position
     py = src[1] + dy
     if (px, py) not in gameStateObj['stars']:
